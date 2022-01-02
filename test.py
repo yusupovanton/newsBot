@@ -132,8 +132,9 @@ def write_news_to_file(keyword, file_name, links_list):
 
 
 def telegrambot(message):
-
+    print("tgenter")
     bot.send_message(chat_id=CHANNEL_ID, text=message)
+    print('tgout')
 
 
 '''Main function (maintenance)'''
