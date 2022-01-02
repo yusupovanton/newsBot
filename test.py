@@ -141,7 +141,6 @@ def telegrambot(message):
 
 def main():
     links_list = open(FILE_NAME).readlines()
-    print("links read are: " + str(links_list))
 
     lower_bound = 1
     while True:
@@ -159,7 +158,7 @@ def main():
                 write_news_to_file(random_tag, FILE_NAME, links)
                 links_list = open(FILE_NAME).readlines()
             link = links_list[0]
-            print(str(link))
+            
             url = str(link)
             api_url = f"https://cutt.ly/api/api.php?key={api_key}&short={url}"
             data = requests.get(api_url).json()["url"]
