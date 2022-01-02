@@ -1,156 +1,187 @@
+import random
+import time
+from config import CHANNEL_ID, API_KEY, FILE_NAME, SHORTENER_TOKEN
 import requests
 from bs4 import BeautifulSoup
-import redis
-from fuzzywuzzy import process
 import telebot
-from config import API_KEY
+from fuzzywuzzy import fuzz
+from fuzzywuzzy import process
+
+'''TELEGRAM BOT LOGIN'''
+
+bot = telebot.TeleBot(API_KEY)
+bot.send_message(chat_id=CHANNEL_ID, text="message")
+
+'''Shortener'''
+api_key = SHORTENER_TOKEN
+
+
+
+'''HTML Scraping (news)'''
+
 
 class ScraperYandex:
-    def __init__(self, keywords):
-        self.markup = requests.get('https://yandex.ru/news/').text
-        self.keywords = keywords
+    def __init__(self):
+        self.url = 'https://yandex.ru/news/'
+        self.markup = requests.get(self.url).text
         self.saved_links = []
+        self.available_themes = []
+        self.available_themeslinks = []
+        self.soup = BeautifulSoup(self.markup, 'html.parser')
 
-    def parse(self):
-        soup = BeautifulSoup(self.markup, 'html.parser')
-        print(soup)
+    def most_popular_news(self):
+        soup = self.soup
+        url = self.url
+        captcha = self.soup.findAll('div', {"class": "CheckboxCaptcha"})
+
+        if captcha != []:
+            print("captcha encounter!")
+
+        self.markup = requests.get(url).text
+
         links = soup.findAll('a', {"class": "mg-card__link"})
+        for item in links:
+            item = str(item)
+            link = item.split('href="')[1].split('" rel')[0]
+            self.saved_links.append(link)
+        return self.saved_links
 
-        for keyword in self.keywords:
-            threeLinks = process.extract(keyword, links, limit=3)
-            for link in threeLinks:
-                print(link)
-                val = link[1]
-                if val >= 60:
-                    self.saved_links.append(link)
+    def get_categories(self):
+        captcha = self.soup.findAll('div', {"class": "CheckboxCaptcha"})
 
-    def store(self):
-        r = redis.Redis(host='localhost', port=6379, db=0)
-        for link in self.saved_links:
-            r.set(link.text, str(link))
+        if captcha != []:
+            print("captcha encounter!")
 
+        themes_spans = self.soup.findAll('span', {"class": "news-navigation-menu__title"})
+        themes_links = self.soup.findAll('a', {"class": "news-navigation-menu__item"})
+        dictionary = {}
 
-class ScraperRia:
-    def __init__(self, keywords):
-        self.markup = requests.get('https://ria.ru/').text
-        self.keywords = keywords
-        self.saved_links = []
+        for item in themes_spans:
+            item = str(item)
+            theme_name = item.split('>')[1].split('<')[0]
+            self.available_themes.append(theme_name)
 
-    def parse(self):
-        soup = BeautifulSoup(self.markup, 'html.parser')
-        links = soup.findAll('a', {"class": "cell-list__item-link color-font-hover-only"})
-        print(links)
-        for keyword in self.keywords:
-            threeLinks = process.extract(keyword, links, limit=3)
-            for link in threeLinks:
-                print(link)
-                val = link[1]
-                if val >= 50:
-                    self.saved_links.append(link)
+        for item in themes_links:
+            item = str(item)
+            theme_link = item.split('href="')[1].split('" rel')[0]
+            self.available_themeslinks.append(theme_link)
 
-    def store(self):
-        r = redis.Redis(host='localhost', port=6379, db=0)
-        for link in self.saved_links:
-            r.set(link.text, str(link))
+        i = 0
+        for item in self.available_themes:
+            dictionary.update({item: self.available_themeslinks[i]})
+            i += 1
 
-    def email(self):
-        r = redis.Redis(host='localhost', port=6379, db=0)
-        links = [r.get(k) for k in r.keys()]
-        r.flushdb()
+        if len(self.available_themes) != len(themes_links):
+            print("error in lengths of arrays. Not able to create categories dictionary!")
+            return Exception
+        return self.available_themes, dictionary
 
 
-class ScraperLen:
-    def __init__(self, keywords):
-        self.markup = requests.get('https://lenta.ru/').text
-        self.keywords = keywords
-        self.saved_links = []
+def get_tags():
+    tags_list = []
+    try:
+        tags_url = 'https://ria.ru/tags/?page=1'
+        markup = requests.get(tags_url).text
+        soup = BeautifulSoup(markup, 'html.parser')
 
-    def parse(self):
-        soup = BeautifulSoup(self.markup, 'html.parser')
-
-        links = soup.findAll('a', {"class": "titles"})
-
-        for keyword in self.keywords:
-            threeLinks = process.extract(keyword, links, limit=3)
-            for link in threeLinks:
-
-                val = link[1]
-                if val >= 50:
-                    self.saved_links.append(link)
-
-    def store(self):
-        r = redis.Redis(host='localhost', port=6379, db=0)
-        for link in self.saved_links:
-            r.set(link.text, str(link))
-
-    def email(self):
-        r = redis.Redis(host='localhost', port=6379, db=0)
-        links = [r.get(k) for k in r.keys()]
-        r.flushdb()
+        tags = soup.findAll('a', {'class': 'tags__list-item'})
+        for item in tags:
+            item = str(item)
+            tags_trim = item.split('>')[1].split('</')[0]
+            tags_list.append(tags_trim)
+        top10 = tags_list[:10]
+        return top10
+    except Exception as ex:
+        print(ex)
 
 
 def get_news(keyword):
-    links = []
+    result_list = []
+    categories = ScraperYandex(keyword).get_categories()[0]
+    print("Категории: " + str(categories))
 
-    ya = ScraperYandex([keyword]).parse()
-    ria = ScraperRia([keyword]).parse()
-    lenta = ScraperLen([keyword]).parse()
+    try:
+        random_categorie = random.choice(categories)
+        print("Случайный выбор категории: " + str(random_categorie))
 
-    # Yandex
-    start = 'href='
-    end = 'rel='
-    for link in ya.saved_links:
-        link = str(link)
-        length = len(start)
-        a = link.find(start)
-        b = link.find(end)
-        link_cut = link[(a + length + 1):(b - 2)]
+        dictionary = ScraperYandex(keyword).get_categories()[1]
+        random_categorie_link = dictionary[str(random_categorie)]
+        print("Значение ключа из наших ссылок: " + str(random_categorie_link))
 
+        news_list = str(ScraperYandex(keyword).most_popular_news())
+        for item in news_list:
+            item = str(item)
+            item_trim = item.split('href="')[1].split('" rel')[0]
+            result_list.append(item_trim)
 
-    # Ria
-    start = 'href='
-    end = 'title='
-    for link in ria.saved_links:
-        link = str(link)
-        length = len(start)
-        a = link.find(start)
-        b = link.find(end)
-        link_cut = link[(a + length + 1):(b - 2)]
-        links.append(link_cut)
+        print("Список самых популярных новостей на сейчас: " + str(result_list))
 
-    # Lenta
-    start = 'href='
-    end = '<h3'
-    for link in lenta.saved_links:
-        link = str(link)
-        length = len(start)
-        a = link.find(start)
-        b = link.find(end)
-        link_cut = link[(a + length + 1):(b - 2)]
-        links.append(link_cut)
-
-    return links
+    except Exception as ex:
+        print(ex)
 
 
-# telegram bot part
-def telegrambot(api):
-    bot = telebot.TeleBot(api)
+def write_news_to_file(keyword, file_name, links_list):
+    links_list_sorted = process.extract(keyword, links_list, limit=14)
 
-    @bot.message_handler(content_types="text")
-    def send_news(message):
-        try:
-            links = get_news(str(message))
-            bot.send_message(message.chat.id, "Here will be your news in a while...")
-            for link in links:
-                bot.reply_to(message, link)
+    with open(file_name, 'w') as file:
+        for item in links_list_sorted:
+            item = str(item[0])
+            file.write(item + '\n')
 
-        except Exception as ex:
-            print(ex)
 
-    bot.polling()
+'''Telegram bot'''
+
+
+def telegrambot(message):
+    print("tgenter"+message)
+    bot.send_message(chat_id=CHANNEL_ID, text=message)
+    print('tgout')
+
+
+'''Main function (maintenance)'''
+
 
 def main():
-    telegrambot(API_KEY)
+    links_list = open(FILE_NAME).readlines()
+
+    lower_bound = 1
+    while True:
+        links_left = len(links_list)
+        print("amount of links there are left: " + str(links_left))
+
+        try:
+            top10tags = get_tags()
+            random_tag = random.choice(top10tags)
+            print('random tag is: ' + random_tag)
+
+            if links_left < lower_bound:
+                print('Need to go set some news...')
+                links = ScraperYandex().most_popular_news()
+                write_news_to_file(random_tag, FILE_NAME, links)
+                links_list = open(FILE_NAME).readlines()
+            link = links_list[0]
+            
+            url = str(link)
+            api_url = f"https://cutt.ly/api/api.php?key={api_key}&short={url}"
+            data = requests.get(api_url).json()["url"]
+            if data["status"] == 7:
+                shortened_url = data["shortLink"]
+                telegrambot(shortened_url)
+                print("The link is sent!")
+                links_list.pop(0)
+                with open(FILE_NAME, 'w') as file:
+                    for item in links_list:
+                        item = str(item)
+                        file.write(item)
+            else:
+                print("[!] Error Shortening URL:", data)
+
+        except Exception as ex:
+            print('Error encountered: ' + str(ex))
+
+        print('Going to sleep for a while...')
+        sleep_time = random.randint(2400, 3600)
+        time.sleep(sleep_time)
 
 
 if __name__ == '__main__':
